@@ -3,6 +3,8 @@ import telebot
 import logging
 import socket
 import dns.resolver
+from telebot.handler_backends import State, StatesGroup
+from telebot.storage import StateMemoryStorage
 
 # Настройка DNS
 dns.resolver.default_resolver = dns.resolver.Resolver(configure=False)
