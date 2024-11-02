@@ -1,10 +1,9 @@
 import os
 import telebot
 import logging
-import requests
-import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from threading import Thread
+import socket
 
 # Настройка логирования
 logging.basicConfig(
@@ -13,24 +12,38 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Инициализация бота с увеличенными таймаутами
+# Добавляем прямые IP-адреса Telegram API в hosts
+class HostsResolver:
+    def __init__(self):
+        self.hosts = {
+            'api.telegram.org': '149.154.167.220',
+            'core.telegram.org': '149.154.167.220'
+        }
+    
+    def resolve(self, host):
+        return self.hosts.get(host, None)
+
+resolver = HostsResolver()
+
+# Переопределяем функцию разрешения имен
+def custom_getaddrinfo(host, port, *args, **kwargs):
+    try:
+        ip = resolver.resolve(host)
+        if ip:
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (ip, port))]
+        return socket.orig_getaddrinfo(host, port, *args, **kwargs)
+    except Exception as e:
+        logger.error(f"DNS resolution error: {e}")
+        raise
+
+# Сохраняем оригинальную функцию и заменяем на нашу
+socket.orig_getaddrinfo = socket.getaddrinfo
+socket.getaddrinfo = custom_getaddrinfo
+
+# Инициализация бота
 TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_ID = os.getenv('ADMIN_ID')
 
-# Создаем сессию с настроенными DNS
-session = requests.Session()
-session.headers.update({'User-Agent': 'TelegramBot (like TwitterBot)'})
-
-# Настраиваем адаптер с увеличенными таймаутами
-adapter = requests.adapters.HTTPAdapter(
-    max_retries=3,
-    pool_connections=10,
-    pool_maxsize=10
-)
-session.mount('https://', adapter)
-
-# Конфигурация telebot для использования нашей сессии
-telebot.apihelper.SESSION = session
 bot = telebot.TeleBot(TOKEN)
 
 # Простой HTTP сервер для health checks
@@ -99,30 +112,31 @@ def send_help(message):
     """
     bot.reply_to(message, help_text)
 
-def test_connection():
+def test_api():
     try:
-        response = session.get('https://api.telegram.org', timeout=10)
-        return response.status_code == 200
+        bot.get_me()
+        logger.info("Successfully connected to Telegram API")
+        return True
     except Exception as e:
-        logger.error(f"Connection test failed: {e}")
+        logger.error(f"Failed to connect to Telegram API: {e}")
         return False
 
 if __name__ == '__main__':
     logger.info("Bot starting...")
     
-    # Проверяем соединение
-    if not test_connection():
-        logger.error("Failed to connect to Telegram API")
-        exit(1)
-    
     try:
+        # Проверяем соединение с API
+        if not test_api():
+            logger.error("Failed initial API connection test")
+            exit(1)
+            
         # Запускаем health check сервер в отдельном потоке
         health_thread = Thread(target=run_health_server, daemon=True)
         health_thread.start()
         logger.info("Health check server thread started")
         
-        # Запускаем бота с настройками переподключения
+        # Запускаем бота
         logger.info("Starting bot polling...")
-        bot.infinity_polling(timeout=20, long_polling_timeout=10, restart_on_exception=True)
+        bot.infinity_polling(timeout=20, long_polling_timeout=10)
     except Exception as e:
         logger.error(f"Error during startup: {e}")
