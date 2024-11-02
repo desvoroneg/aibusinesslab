@@ -1,8 +1,12 @@
 import os
 import telebot
 import logging
-from telebot.handler_backends import State, StatesGroup
-from telebot.storage import StateMemoryStorage
+import socket
+import dns.resolver
+
+# Настройка DNS
+dns.resolver.default_resolver = dns.resolver.Resolver(configure=False)
+dns.resolver.default_resolver.nameservers = ['8.8.8.8', '8.8.4.4']
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -12,6 +16,20 @@ logger = logging.getLogger(__name__)
 TOKEN = os.getenv('BOT_TOKEN')
 CHANNEL_ID = os.getenv('CHANNEL_ID')
 ADMIN_ID = os.getenv('ADMIN_ID')
+
+# Настройка для работы за прокси
+def custom_resolver(host):
+    try:
+        return socket.gethostbyname(host)
+    except:
+        try:
+            answers = dns.resolver.resolve(host, 'A')
+            return answers[0].address
+        except Exception as e:
+            logger.error(f"DNS resolution failed: {e}")
+            raise
+
+socket.getaddrinfo = custom_resolver
 
 state_storage = StateMemoryStorage()
 bot = telebot.TeleBot(TOKEN, state_storage=state_storage)
@@ -80,4 +98,10 @@ def send_help(message):
 # Запуск бота
 if __name__ == '__main__':
     logger.info("Bot started")
-    bot.infinity_polling()
+    try:
+        logger.info("Testing DNS resolution...")
+        test_ip = socket.gethostbyname('api.telegram.org')
+        logger.info(f"DNS resolution successful: {test_ip}")
+        bot.infinity_polling()
+    except Exception as e:
+        logger.error(f"Startup error: {e}")
