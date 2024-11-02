@@ -1,20 +1,8 @@
 import os
 import telebot
 import logging
-import requests
-import time
-from flask import Flask
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from threading import Thread
-
-# Настройка Flask
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return 'Bot is running'
-
-def run_flask():
-    app.run(host='0.0.0.0', port=8000)
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -25,6 +13,22 @@ TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_ID = os.getenv('ADMIN_ID')
 
 bot = telebot.TeleBot(TOKEN)
+
+# Простой HTTP сервер для health checks
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'OK')
+    
+    def log_message(self, format, *args):
+        pass
+
+def run_health_server():
+    server = HTTPServer(('0.0.0.0', 8000), HealthCheckHandler)
+    logger.info("Health check server started on port 8000")
+    server.serve_forever()
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -76,10 +80,16 @@ def send_help(message):
     """
     bot.reply_to(message, help_text)
 
-# Запуск бота
 if __name__ == '__main__':
-    logger.info("Bot started")
-    # Запускаем Flask в отдельном потоке
-    Thread(target=run_flask).start()
-    # Запускаем бота
-    bot.infinity_polling()
+    logger.info("Bot starting...")
+    try:
+        # Запускаем health check сервер в отдельном потоке
+        health_thread = Thread(target=run_health_server, daemon=True)
+        health_thread.start()
+        logger.info("Health check server thread started")
+        
+        # Запускаем бота
+        logger.info("Starting bot polling...")
+        bot.infinity_polling()
+    except Exception as e:
+        logger.error(f"Error during startup: {e}")
