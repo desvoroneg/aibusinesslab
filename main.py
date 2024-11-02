@@ -3,8 +3,18 @@ import telebot
 import logging
 import requests
 import time
-from telebot.handler_backends import State, StatesGroup
-from telebot.storage import StateMemoryStorage
+from flask import Flask
+from threading import Thread
+
+# Настройка Flask
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return 'Bot is running'
+
+def run_flask():
+    app.run(host='0.0.0.0', port=8000)
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -12,18 +22,9 @@ logger = logging.getLogger(__name__)
 
 # Инициализация бота
 TOKEN = os.getenv('BOT_TOKEN')
-CHANNEL_ID = os.getenv('CHANNEL_ID')
 ADMIN_ID = os.getenv('ADMIN_ID')
 
-# Создание сессии requests с таймаутом
-session = requests.Session()
-session.timeout = 30
-
-# Конфигурация telebot для использования нашей сессии
-telebot.apihelper.SESSION = session
-
-state_storage = StateMemoryStorage()
-bot = telebot.TeleBot(TOKEN, state_storage=state_storage)
+bot = telebot.TeleBot(TOKEN)
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -32,9 +33,7 @@ def send_welcome(message):
 
 Через меня вы можете получить чек-лист "20 процессов в вашем бизнесе, которые можно автоматизировать прямо сейчас с помощью AI"
 
-Чтобы получить чек-лист:
-1. Подпишитесь на канал @AIBusinessLab
-2. Отправьте команду /checklist
+Чтобы получить чек-лист, отправьте команду /checklist
 
 🎁 Желаю продуктивной автоматизации!
     """
@@ -46,31 +45,22 @@ def handle_checklist_request(message):
     username = message.from_user.username
     
     try:
-        user_channel_status = bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
-        is_subscribed = user_channel_status.status in ['member', 'administrator', 'creator']
-        
-        if is_subscribed:
-            with open('checklist.pdf', 'rb') as checklist:
-                bot.send_document(
-                    message.chat.id,
-                    checklist,
-                    caption="Спасибо за подписку! Вот ваш чек-лист по автоматизации бизнес-процессов 🎁"
-                )
-            # Уведомление админу
-            bot.send_message(
-                ADMIN_ID,
-                f"Новая выдача чек-листа!\nUser: @{username}\nID: {user_id}"
+        with open('checklist.pdf', 'rb') as checklist:
+            bot.send_document(
+                message.chat.id,
+                checklist,
+                caption="Вот ваш чек-лист по автоматизации бизнес-процессов 🎁\n\nПодписывайтесь на наш канал @AIBusinessLab для получения новых материалов!"
             )
-        else:
-            bot.reply_to(
-                message,
-                f"Для получения чек-листа подпишитесь на канал @AIBusinessLab и попробуйте снова!"
-            )
+        # Уведомление админу
+        bot.send_message(
+            ADMIN_ID,
+            f"Новая выдача чек-листа!\nUser: @{username}\nID: {user_id}"
+        )
     except Exception as e:
         logger.error(f"Error: {e}")
         bot.reply_to(
             message,
-            "Произошла ошибка. Пожалуйста, попробуйте позже или напишите в поддержку."
+            "Произошла ошибка. Пожалуйста, попробуйте позже или напишите в поддержку @desvoroneg"
         )
 
 @bot.message_handler(commands=['help'])
@@ -86,36 +76,10 @@ def send_help(message):
     """
     bot.reply_to(message, help_text)
 
-def test_telegram_api():
-    try:
-        url = f"https://api.telegram.org/bot{TOKEN}/getMe"
-        response = session.get(url)
-        response.raise_for_status()
-        return True
-    except Exception as e:
-        logger.error(f"API test failed: {e}")
-        return False
-
 # Запуск бота
 if __name__ == '__main__':
     logger.info("Bot started")
-    max_retries = 5
-    retry_count = 0
-    
-    while retry_count < max_retries:
-        try:
-            if test_telegram_api():
-                logger.info("Successfully connected to Telegram API")
-                bot.infinity_polling()
-                break
-            else:
-                logger.warning("Failed to connect to Telegram API, retrying...")
-                retry_count += 1
-                time.sleep(5)
-        except Exception as e:
-            logger.error(f"Error during bot execution: {e}")
-            retry_count += 1
-            time.sleep(5)
-    
-    if retry_count >= max_retries:
-        logger.error("Max retries reached, bot startup failed")
+    # Запускаем Flask в отдельном потоке
+    Thread(target=run_flask).start()
+    # Запускаем бота
+    bot.infinity_polling()
