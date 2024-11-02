@@ -1,14 +1,10 @@
 import os
 import telebot
 import logging
-import socket
-import dns.resolver
+import requests
+import time
 from telebot.handler_backends import State, StatesGroup
 from telebot.storage import StateMemoryStorage
-
-# Настройка DNS
-dns.resolver.default_resolver = dns.resolver.Resolver(configure=False)
-dns.resolver.default_resolver.nameservers = ['8.8.8.8', '8.8.4.4']
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -19,19 +15,12 @@ TOKEN = os.getenv('BOT_TOKEN')
 CHANNEL_ID = os.getenv('CHANNEL_ID')
 ADMIN_ID = os.getenv('ADMIN_ID')
 
-# Настройка для работы за прокси
-def custom_resolver(host):
-    try:
-        return socket.gethostbyname(host)
-    except:
-        try:
-            answers = dns.resolver.resolve(host, 'A')
-            return answers[0].address
-        except Exception as e:
-            logger.error(f"DNS resolution failed: {e}")
-            raise
+# Создание сессии requests с таймаутом
+session = requests.Session()
+session.timeout = 30
 
-socket.getaddrinfo = custom_resolver
+# Конфигурация telebot для использования нашей сессии
+telebot.apihelper.SESSION = session
 
 state_storage = StateMemoryStorage()
 bot = telebot.TeleBot(TOKEN, state_storage=state_storage)
@@ -97,13 +86,36 @@ def send_help(message):
     """
     bot.reply_to(message, help_text)
 
+def test_telegram_api():
+    try:
+        url = f"https://api.telegram.org/bot{TOKEN}/getMe"
+        response = session.get(url)
+        response.raise_for_status()
+        return True
+    except Exception as e:
+        logger.error(f"API test failed: {e}")
+        return False
+
 # Запуск бота
 if __name__ == '__main__':
     logger.info("Bot started")
-    try:
-        logger.info("Testing DNS resolution...")
-        test_ip = socket.gethostbyname('api.telegram.org')
-        logger.info(f"DNS resolution successful: {test_ip}")
-        bot.infinity_polling()
-    except Exception as e:
-        logger.error(f"Startup error: {e}")
+    max_retries = 5
+    retry_count = 0
+    
+    while retry_count < max_retries:
+        try:
+            if test_telegram_api():
+                logger.info("Successfully connected to Telegram API")
+                bot.infinity_polling()
+                break
+            else:
+                logger.warning("Failed to connect to Telegram API, retrying...")
+                retry_count += 1
+                time.sleep(5)
+        except Exception as e:
+            logger.error(f"Error during bot execution: {e}")
+            retry_count += 1
+            time.sleep(5)
+    
+    if retry_count >= max_retries:
+        logger.error("Max retries reached, bot startup failed")
