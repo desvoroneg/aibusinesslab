@@ -3,9 +3,32 @@ import telebot
 import logging
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from threading import Thread
+import socket
+import dns.resolver
+
+# Настройка DNS
+dns.resolver.default_resolver = dns.resolver.Resolver(configure=False)
+dns.resolver.default_resolver.nameservers = ['8.8.8.8', '8.8.4.4']  # Google DNS
+
+# Переопределяем функцию разрешения имен
+def custom_resolver(host):
+    try:
+        return socket.gethostbyname(host)
+    except:
+        try:
+            answers = dns.resolver.resolve(host, 'A')
+            return answers[0].address
+        except Exception as e:
+            logger.error(f"DNS resolution failed: {e}")
+            raise
+
+socket.getaddrinfo = lambda *args: [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (custom_resolver(args[0]), args[1]))]
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Инициализация бота
@@ -80,9 +103,23 @@ def send_help(message):
     """
     bot.reply_to(message, help_text)
 
+def test_dns():
+    try:
+        ip = custom_resolver('api.telegram.org')
+        logger.info(f"Successfully resolved api.telegram.org to {ip}")
+        return True
+    except Exception as e:
+        logger.error(f"DNS test failed: {e}")
+        return False
+
 if __name__ == '__main__':
     logger.info("Bot starting...")
     try:
+        # Проверяем DNS
+        if not test_dns():
+            logger.error("DNS resolution test failed")
+            exit(1)
+            
         # Запускаем health check сервер в отдельном потоке
         health_thread = Thread(target=run_health_server, daemon=True)
         health_thread.start()
